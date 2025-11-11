@@ -38,4 +38,5 @@ test_*.icc
 
 # Application specific
 scanner.log
+scanner_config.json
 fixed/

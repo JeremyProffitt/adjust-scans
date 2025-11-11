@@ -9,6 +9,7 @@ import (
 	"github.com/adjust-scans/scanner/internal/config"
 	"github.com/adjust-scans/scanner/internal/logger"
 	"github.com/adjust-scans/scanner/internal/processor"
+	"github.com/adjust-scans/scanner/internal/singleton"
 	"github.com/adjust-scans/scanner/internal/tray"
 	"github.com/adjust-scans/scanner/internal/watcher"
 )
@@ -24,6 +25,18 @@ var (
 
 func main() {
 	flag.Parse()
+
+	// Check for singleton instance
+	locked, err := singleton.TryLock()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to check for existing instance: %v\n", err)
+		os.Exit(1)
+	}
+	if !locked {
+		fmt.Fprintln(os.Stderr, "Another instance of Scanner is already running")
+		os.Exit(1)
+	}
+	defer singleton.Unlock()
 
 	// Initialize logger
 	log, err := logger.New(*logFile)
@@ -109,9 +122,8 @@ func main() {
 		}
 
 	default:
-		// No mode specified - start in tray mode with configuration UI
-		log.Info("Starting in tray mode - use Settings to configure")
-		fmt.Println("Scanner started in tray mode. Right-click the tray icon to configure settings.")
+		// No mode specified - start in tray mode
+		log.Info("Starting in tray mode")
 		if err := trayMode(proc, cfg, log); err != nil {
 			log.Errorf("Failed to start tray mode: %v", err)
 			os.Exit(1)
