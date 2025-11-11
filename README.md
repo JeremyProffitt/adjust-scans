@@ -31,6 +31,25 @@ go build -o scanner.exe .
 
 ## Usage
 
+### Quick Start (GUI Configuration)
+
+Simply run the scanner without any arguments to start in tray mode:
+
+```bash
+scanner.exe
+```
+
+This will:
+- Show a system tray icon
+- Allow you to configure settings via the right-click menu
+- Save your configuration for future use
+
+Right-click the tray icon and select **Settings** to:
+- Choose your ICC color profile
+- Select the directory to watch for new images
+
+Once configured, restart the application to start watching for new images automatically.
+
 ### Watch Directory Mode
 
 Monitor a directory for new images and process them automatically:
@@ -39,10 +58,16 @@ Monitor a directory for new images and process them automatically:
 scanner.exe -watch "C:\Scans" -profile "C:\Profiles\sRGB.icc"
 ```
 
+Or, if you've already configured settings via the GUI:
+
+```bash
+scanner.exe
+```
+
 This will:
-- Watch the `C:\Scans` directory for new TIFF/JPG files
-- Apply the color profile from `sRGB.icc`
-- Save corrected images to `C:\Scans\fixed\`
+- Watch the configured directory for new TIFF/JPG files
+- Apply the configured color profile
+- Save corrected images to the `fixed` subdirectory
 - Show a system tray icon for monitoring
 
 ### Batch Process Directory
@@ -65,22 +90,33 @@ scanner.exe -process-file "C:\Scans\image.tiff" -profile "C:\Profiles\sRGB.icc"
 
 | Flag | Description | Required |
 |------|-------------|----------|
-| `-watch` | Directory to watch for new images | * |
-| `-process-dir` | Process all images in directory and exit | * |
-| `-process-file` | Process a specific file and exit | * |
-| `-profile` | Path to ICC color profile file | Yes |
+| `-watch` | Directory to watch for new images | No* |
+| `-process-dir` | Process all images in directory and exit | No* |
+| `-process-file` | Process a specific file and exit | No* |
+| `-profile` | Path to ICC color profile file | No** |
 | `-output` | Output subdirectory name (default: "fixed") | No |
 | `-log` | Log file path (default: "scanner.log") | No |
 
-*One of `-watch`, `-process-dir`, or `-process-file` must be specified.
+*If no mode is specified, the application starts in tray mode with GUI configuration.
+**Profile is required for `-process-file` and `-process-dir` modes. For watch mode, it can be configured via the Settings menu.
 
 ## System Tray Features
 
-When running in watch mode, the system tray icon provides:
+When running the application, the system tray icon provides:
 
 - **Recent Images**: View the last 10 processed images with status
+- **Settings**: Configure ICC profile and watch directory via file/folder dialogs
 - **Open Log File**: Quickly open the log file in Notepad
 - **Quit**: Exit the application
+
+### Configuration File
+
+The application saves your settings in `scanner_config.json` in the same directory as the executable. This file contains:
+- ICC color profile path
+- Watch directory path
+- Output subdirectory name
+
+You can edit this file manually or use the Settings menu in the system tray.
 
 ## Supported Formats
 
@@ -99,6 +135,16 @@ You can obtain ICC profiles from:
 - Your scanner manufacturer
 - Color management systems
 - Standard profile repositories
+
+### Creating Test Profiles
+
+A Python script is included to generate test ICC profiles:
+
+```bash
+python generate_red_profile.py
+```
+
+This creates `red_plus_22.icc`, a test profile that increases the red channel by 22 (out of 255). You can use this for testing or as a reference for creating custom profiles.
 
 ## Development
 
@@ -135,17 +181,24 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Troubleshooting
 
 ### Application won't start
-- Ensure you've specified a valid color profile with `-profile`
+- For batch/single file modes, ensure you've specified a valid color profile with `-profile`
+- For watch mode, you can configure the profile via the Settings menu after starting
 - Check that the profile file exists and is readable
 
 ### Images not being processed
-- Verify the watch directory exists and is accessible
+- Verify the watch directory is configured (via Settings or `-watch` flag)
+- Ensure the watch directory exists and is accessible
 - Check the log file for error messages
 - Ensure images are in TIFF or JPEG format
+- Verify that a color profile is configured
 
 ### System tray icon not appearing
-- This feature only works in watch mode (`-watch` flag)
+- The system tray appears when running without arguments or in watch mode
 - On Windows, check if the system tray is enabled
+
+### Settings not saving
+- Check that the application has write permissions in its directory
+- The configuration is saved in `scanner_config.json`
 
 ## Support
 

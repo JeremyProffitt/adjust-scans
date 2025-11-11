@@ -33,11 +33,19 @@ type Processor struct {
 }
 
 func New(profilePath string, log *logger.Logger) *Processor {
-	// Read color profile
-	profileData, err := os.ReadFile(profilePath)
-	if err != nil {
-		log.Errorf("Failed to read color profile: %v", err)
-		profileData = nil
+	var profileData []byte
+
+	// Read color profile if path is provided
+	if profilePath != "" {
+		data, err := os.ReadFile(profilePath)
+		if err != nil {
+			log.Warningf("Failed to read color profile: %v (processing will continue without profile correction)", err)
+		} else {
+			profileData = data
+			log.Infof("Loaded color profile: %s", profilePath)
+		}
+	} else {
+		log.Warning("No color profile specified - images will be processed without color correction")
 	}
 
 	return &Processor{
@@ -180,4 +188,23 @@ func (p *Processor) GetRecentImages() []ProcessedImage {
 	images := make([]ProcessedImage, len(p.recentImages))
 	copy(images, p.recentImages)
 	return images
+}
+
+// UpdateProfile updates the color profile at runtime
+func (p *Processor) UpdateProfile(profilePath string) error {
+	var profileData []byte
+
+	if profilePath != "" {
+		data, err := os.ReadFile(profilePath)
+		if err != nil {
+			p.log.Errorf("Failed to read color profile: %v", err)
+			return err
+		}
+		profileData = data
+		p.log.Infof("Updated color profile: %s", profilePath)
+	}
+
+	p.profilePath = profilePath
+	p.profileData = profileData
+	return nil
 }

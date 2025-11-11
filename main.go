@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/adjust-scans/scanner/internal/config"
 	"github.com/adjust-scans/scanner/internal/logger"
 	"github.com/adjust-scans/scanner/internal/processor"
 	"github.com/adjust-scans/scanner/internal/tray"
@@ -34,26 +35,41 @@ func main() {
 
 	log.Info("Scanner application started")
 
-	// Validate color profile
-	if *colorProfile == "" {
-		log.Error("Color profile is required. Use -profile flag")
-		fmt.Fprintln(os.Stderr, "Error: Color profile is required. Use -profile flag")
+	// Load or create configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Errorf("Failed to load configuration: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
 	}
 
-	if _, err := os.Stat(*colorProfile); os.IsNotExist(err) {
-		log.Errorf("Color profile file not found: %s", *colorProfile)
-		fmt.Fprintf(os.Stderr, "Error: Color profile file not found: %s\n", *colorProfile)
-		os.Exit(1)
+	// Override config with command-line flags if provided
+	if *colorProfile != "" {
+		cfg.SetProfilePath(*colorProfile)
+	}
+	if *watchDir != "" {
+		cfg.SetWatchDir(*watchDir)
+	}
+	if *outputDir != "" {
+		cfg.SetOutputDir(*outputDir)
 	}
 
-	// Create processor
-	proc := processor.New(*colorProfile, log)
+	// Create processor (will work even without profile, but won't apply corrections)
+	profilePath := cfg.GetProfilePath()
+	if *colorProfile != "" {
+		profilePath = *colorProfile
+	}
+	proc := processor.New(profilePath, log)
 
 	// Handle different modes
 	switch {
 	case *processFile != "":
 		// Process single file and exit
+		if profilePath == "" {
+			log.Error("Color profile is required for processing. Use -profile flag or configure in settings")
+			fmt.Fprintln(os.Stderr, "Error: Color profile is required. Use -profile flag")
+			os.Exit(1)
+		}
 		if err := processSingleFile(proc, *processFile, log); err != nil {
 			log.Errorf("Failed to process file: %v", err)
 			os.Exit(1)
@@ -62,23 +78,44 @@ func main() {
 
 	case *processDir != "":
 		// Process all files in directory and exit
-		if err := processDirectory(proc, *processDir, *outputDir, log); err != nil {
+		if profilePath == "" {
+			log.Error("Color profile is required for processing. Use -profile flag or configure in settings")
+			fmt.Fprintln(os.Stderr, "Error: Color profile is required. Use -profile flag")
+			os.Exit(1)
+		}
+		outputDirName := *outputDir
+		if outputDirName == "" {
+			outputDirName = cfg.GetOutputDir()
+		}
+		if err := processDirectory(proc, *processDir, outputDirName, log); err != nil {
 			log.Errorf("Failed to process directory: %v", err)
 			os.Exit(1)
 		}
 		log.Info("Directory processed successfully")
 
-	case *watchDir != "":
+	case *watchDir != "" || cfg.GetWatchDir() != "":
 		// Watch directory mode
-		if err := watchDirectory(proc, *watchDir, *outputDir, log); err != nil {
+		watchDirPath := *watchDir
+		if watchDirPath == "" {
+			watchDirPath = cfg.GetWatchDir()
+		}
+		outputDirName := *outputDir
+		if outputDirName == "" {
+			outputDirName = cfg.GetOutputDir()
+		}
+		if err := watchDirectory(proc, cfg, watchDirPath, outputDirName, log); err != nil {
 			log.Errorf("Failed to start watcher: %v", err)
 			os.Exit(1)
 		}
 
 	default:
-		flag.Usage()
-		fmt.Fprintln(os.Stderr, "\nError: You must specify one of: -watch, -process-dir, or -process-file")
-		os.Exit(1)
+		// No mode specified - start in tray mode with configuration UI
+		log.Info("Starting in tray mode - use Settings to configure")
+		fmt.Println("Scanner started in tray mode. Right-click the tray icon to configure settings.")
+		if err := trayMode(proc, cfg, log); err != nil {
+			log.Errorf("Failed to start tray mode: %v", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -128,7 +165,7 @@ func processDirectory(proc *processor.Processor, dirPath, outputSubdir string, l
 	return nil
 }
 
-func watchDirectory(proc *processor.Processor, dirPath, outputSubdir string, log *logger.Logger) error {
+func watchDirectory(proc *processor.Processor, cfg *config.Config, dirPath, outputSubdir string, log *logger.Logger) error {
 	outputDir := filepath.Join(dirPath, outputSubdir)
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -141,12 +178,6 @@ func watchDirectory(proc *processor.Processor, dirPath, outputSubdir string, log
 		return fmt.Errorf("failed to create watcher: %w", err)
 	}
 
-	// Create system tray
-	t, err := tray.New(log, proc, *logFile)
-	if err != nil {
-		return fmt.Errorf("failed to create system tray: %w", err)
-	}
-
 	// Start watcher
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("failed to start watcher: %w", err)
@@ -155,10 +186,36 @@ func watchDirectory(proc *processor.Processor, dirPath, outputSubdir string, log
 	log.Infof("Watching directory: %s", dirPath)
 	log.Infof("Output directory: %s", outputDir)
 
+	// Create system tray with config change handler
+	onConfigChange := func() {
+		log.Info("Configuration changed - restart application to apply changes")
+	}
+
+	t, err := tray.New(log, proc, cfg, *logFile, onConfigChange)
+	if err != nil {
+		return fmt.Errorf("failed to create system tray: %w", err)
+	}
+
 	// Run system tray (blocks until quit)
 	t.Run()
 
 	// Cleanup
 	w.Stop()
+	return nil
+}
+
+func trayMode(proc *processor.Processor, cfg *config.Config, log *logger.Logger) error {
+	// Create system tray with config change handler
+	onConfigChange := func() {
+		log.Info("Configuration changed - settings saved")
+	}
+
+	t, err := tray.New(log, proc, cfg, *logFile, onConfigChange)
+	if err != nil {
+		return fmt.Errorf("failed to create system tray: %w", err)
+	}
+
+	// Run system tray (blocks until quit)
+	t.Run()
 	return nil
 }
